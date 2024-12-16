@@ -1,15 +1,13 @@
-const express = require('express');
-const cors = require('cors');
-const app = express()
+const express = require("express");
+const cors = require("cors");
+const app = express();
 const port = process.env.PORT || 3000;
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-require('dotenv').config()
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+require("dotenv").config();
 
-app.use (cors())
+app.use(cors());
 
-app.use(express.json())
-
-
+app.use(express.json());
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_Password}@cluster0.vnx3e.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -19,7 +17,7 @@ const client = new MongoClient(uri, {
     version: ServerApiVersion.v1,
     strict: true,
     deprecationErrors: true,
-  }
+  },
 });
 
 async function run() {
@@ -28,71 +26,111 @@ async function run() {
     await client.connect();
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    console.log(
+      "Pinged your deployment. You successfully connected to MongoDB!"
+    );
 
+    // jobs related apis
 
-// jobs related apis 
+    const jobsCollection = client
+      .db("Nextstep-Careers-Job-Portal")
+      .collection("jobs");
+    const jobsApplicationCollection = client
+      .db("Nextstep-Careers-Job-Portal")
+      .collection("job_applications");
 
-const jobsCollection = client.db('Nextstep-Careers-Job-Portal').collection('jobs')
-const jobsApplicationCollection = client.db('Nextstep-Careers-Job-Portal').collection('job_applications')
+    app.get("/jobs", async (req, res) => {
+      const email = req.query.email;
+      let query = {};
+      if (email) {
+        query = { hr_email: email };
+      }
+      const cursor = jobsCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
 
-app.get('/jobs', async(req, res) =>{
-        const cursor = jobsCollection.find();
-        const result = await cursor.toArray();
-        res.send(result)
-})
+    app.get("/jobs/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await jobsCollection.findOne(query);
+      res.send(result);
+    });
 
-app.get('/jobs/:id', async(req, res) =>{
-  const id = req.params.id;
-  const query = {_id: new ObjectId(id)}
-  const result = await jobsCollection.findOne(query);
-  res.send(result)
-})
+    app.post("/jobs", async (req, res) => {
+      const newJob = req.body;
+      const result = await jobsCollection.insertOne(newJob);
+      res.send(result);
+    });
 
+    // job application apis
 
-// job application apis 
+    app.get("/job-applications", async (req, res) => {
+      const email = req.query.email;
+      const query = { applicant_email: email };
+      const result = await jobsApplicationCollection.find(query).toArray();
 
-app.get('/job-applications', async(req, res) =>{
-  const email = req.query.email;
-  const query = {applicant_email: email }
-  const result = await jobsApplicationCollection.find(query).toArray();
+      for (const application of result) {
+        console.log(application.job_id);
+        const query1 = { _id: new ObjectId(application.job_id) };
+        const job = await jobsCollection.findOne(query1);
+        if (job) {
+          application.title = job.title;
+          application.location = job.location;
+          application.company = job.company;
+          application.company_logo = job.company_logo;
+        }
+      }
 
-for( const application of result){
-  console.log(application.job_id)
-  const query1 = {_id: new ObjectId(application.job_id)}
-  const job = await jobsCollection.findOne(query1)
-  if(job){
-    application.title = job.title;
-    application.location = job.location;
-    application.company = job.company;
-    application.company_logo = job.company_logo;
-  }
-}
+      res.send(result);
+    });
 
+    app.get("/job-applications/jobs/:job_id", async (req, res)=>{
+      const jobId = req.params.job_id;
+      const query= {job_id: jobId}
+      const result= await jobsApplicationCollection.find(query).toArray()
+      res.send(result)
+    }) 
 
-  res.send(result)
-})
+    app.post("/job-applications", async (req, res) => {
+      const application = req.body;
+      const result = await jobsApplicationCollection.insertOne(application);
 
-app.post('/job-applications', async(req, res) =>{
-  const application = req.body;
-  const result = await jobsApplicationCollection.insertOne(application)
-  res.send(result)
+      // not the best way
+      const id = application.job_id;
+      const query = { _id: new ObjectId(id) };
+      const job = await jobsCollection.find(query);
+      let newCount = 0;
+      if (job.applicationCount) {
+        newCount = job.applicationCount + 1;
+      } else {
+        newCount = 1;
+      }
 
-})
+      // now update the job info
 
+      const filter = { _id: new ObjectId(id) };
+      const updatedDoc = {
+       $set: {
+        applicationCount: newCount
+       }
+      }
 
+      const updatedResult =  await jobsCollection.updateOne(filter, updatedDoc);
+
+      res.send(result);
+    });
   } finally {
     // Ensures that the client will close when you finish/error
-//     await client.close();
+    //     await client.close();
   }
 }
 run().catch(console.dir);
 
+app.get("/", (req, res) => {
+  res.send("Job is falling from the sky");
+});
 
-app.get('/', (req, res)=>{
-        res.send('Job is falling from the sky')
-})
-
-app.listen(port, () =>{
-        console.log(`Job is waiting at: ${port} `)
-})
+app.listen(port, () => {
+  console.log(`Job is waiting at: ${port} `);
+});
